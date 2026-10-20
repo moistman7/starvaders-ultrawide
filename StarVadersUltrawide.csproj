@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>StarVadersUltrawide</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>0.1.0</Version>
+    <Authors>NorthernDale</Authors>
+    <!-- Pass your install folder: dotnet build -c Release -p:GameDir="C:\Path\To\StarVaders\" -->
+    <GameDir Condition="'$(GameDir)' == ''">D:\SteamLibrary\steamapps\common\StarVaders\</GameDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="work/**/*.cs" />
+    <Reference Include="$(GameDir)/BepInEx/core/0Harmony.dll" Private="false" />
+    <Reference Include="$(GameDir)/BepInEx/interop/Unity.TextMeshPro.dll" Private="false" />
+    <Reference Include="$(GameDir)/BepInEx/interop/ScriptAssembly.dll" Private="false" />
+    <Reference Include="$(GameDir)/BepInEx\core\BepInEx.Core.dll" Private="false" />
+    <Reference Include="$(GameDir)/BepInEx\core\BepInEx.Unity.IL2CPP.dll" Private="false" />
+    <Reference Include="$(GameDir)/BepInEx\core\Il2CppInterop.Runtime.dll" Private="false" />
+    <Reference Include="$(GameDir)/BepInEx\core\Il2CppInterop.Common.dll" Private="false" />
+    <Reference Include="$(GameDir)/BepInEx\interop\UnityEngine*.dll" Private="false" />
+    <Reference Include="$(GameDir)/BepInEx\interop\Unity.InputSystem.dll" Private="false" />
+    <Reference Include="$(GameDir)/BepInEx\interop\Il2Cppmscorlib.dll" Private="false" />
+  </ItemGroup>
+
+</Project>
