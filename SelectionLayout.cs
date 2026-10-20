@@ -14,11 +14,12 @@ public class SelectionLayout : MonoBehaviour
     float _nextSearch;
     MechSelectionController _selection;
 
-    void Update()
+    void Update() { long started = Profile.Start(); try { UpdateCore(); } finally { Profile.Stop(started, Profile.Hook.Selection); } }
+    void UpdateCore()
     {
         if (_selection == null && Time.unscaledTime >= _nextSearch)
         {
-            _nextSearch = Time.unscaledTime + .25f;
+            _nextSearch = Time.unscaledTime + 1f;
             foreach (var candidate in UnityEngine.Object.FindObjectsOfType(Il2CppInterop.Runtime.Il2CppType.Of<MechSelectionController>()))
             {
                 _selection = candidate.TryCast<MechSelectionController>();

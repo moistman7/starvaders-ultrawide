@@ -22,4 +22,10 @@ namespace StarVadersUltrawide
         static void Prefix(SettingsSceneController __instance) => ModMenu.SettingsClosing(__instance);
     }
 
+    [HarmonyPatch(typeof(PauseMenuController), nameof(PauseMenuController.Awake))]
+    internal static class PauseMenuLifecycle
+    {
+        static void Postfix(PauseMenuController __instance) => ModMenu.PauseCreated(__instance);
+    }
+
 }

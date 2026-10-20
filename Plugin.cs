@@ -13,7 +13,7 @@ using HarmonyLib;
 
 namespace StarVadersUltrawide
 {
-    [BepInPlugin("local.starvaders.ultrawide", "StarVaders Ultrawide", "0.1.1")]
+    [BepInPlugin("local.starvaders.ultrawide", "StarVaders Ultrawide", "0.1.2")]
     public class Plugin : BasePlugin
     {
         internal static Plugin Instance;
@@ -100,7 +100,8 @@ namespace StarVadersUltrawide
             Original.Clear();
         }
 
-        void Update()
+        void Update() { long started = Profile.Start(); try { UpdateCore(); } finally { Profile.Stop(started, Profile.Hook.Scaler); } }
+        void UpdateCore()
         {
             try
             {
@@ -119,7 +120,7 @@ namespace StarVadersUltrawide
                 ForceRes();
 
                 if (Time.unscaledTime < _next) return;
-                _next = Time.unscaledTime + 0.25f;
+                _next = Time.unscaledTime + 1f;
                 Apply();
             }
             catch (Exception e)
@@ -237,6 +238,10 @@ namespace StarVadersUltrawide
                 }
             }
             log.LogInfo(sb.ToString());
+            // With the pause menu open, also record its layout.
+            if (HudSizing.Active != null)
+                foreach (var pause in UnityEngine.Object.FindObjectsOfType<StarVaders.PauseMenuController>())
+                    HudSizing.Active.DumpPauseLayout(pause);
         }
     }
 

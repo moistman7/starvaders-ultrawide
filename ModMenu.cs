@@ -24,6 +24,13 @@ namespace StarVadersUltrawide
 
         void Awake() => _live = this;
 
+        // StarVaders creates its pause screen on demand; take it as soon as it
+        // starts instead of waiting for the once-per-second scene search.
+        internal static void PauseCreated(PauseMenuController pause)
+        {
+            if (_live != null && pause != null) _live._pause = pause;
+        }
+
         internal static void SettingsOpened(SettingsSceneController settings)
         {
             if (_live == null) return;
@@ -52,6 +59,13 @@ namespace StarVadersUltrawide
         }
         GameObject _root;
         GameObject _panel;
+        RectTransform _close;
+        bool _closePressed, _closedWithMouseDown;
+        // Set when the menu opens on a mouse press: the panel takes no mouse
+        // input until that press is released, so its release cannot click
+        // whatever button opened under the cursor (often CLOSE).
+        bool _awaitingRelease;
+        float _closedTime = -10f;
         SettingsSceneController _settings;
         SettingsSceneController _closingSettings;
 
@@ -70,6 +84,8 @@ namespace StarVadersUltrawide
         Text _hudLabel;
         Text _boardLabel;
         Text _enabledLabel;
+        Text _hudLayoutLabel;
+        bool? _syncedCenterHud;
         float _nextSearch;
         bool _syncing;
 
@@ -100,7 +116,8 @@ namespace StarVadersUltrawide
 
 
 
-        void Update()
+        void Update() { long started = Profile.Start(); try { UpdateCore(); } finally { Profile.Stop(started, Profile.Hook.Menu); } }
+        void UpdateCore()
         {
             int scene = SceneManager.GetActiveScene().handle;
             if (_scene != scene)
@@ -147,19 +164,23 @@ namespace StarVadersUltrawide
             if (_root == null) return;
             bool exitingOptions = _closingSettings != null && _closingSettings.isActiveAndEnabled;
             bool inSettings = !exitingOptions && _settings != null && _settings.isActiveAndEnabled;
-            bool showEntry = inSettings;
+            bool inPause = !exitingOptions && !inSettings && PauseVisible();
+            bool showEntry = inSettings || inPause;
             if (_entry.activeSelf != showEntry) _entry.SetActive(showEntry);
-            if (showEntry) PositionEntry(true, false);
+            if (!exitingOptions && !inSettings && PauseShown()) UpdatePauseRow(); else HidePauseRow();
+            if (showEntry) PositionEntry(inSettings, inPause);
             if (_panel.activeSelf && !inSettings && _pauseFont != null && _hudLabel.font != _pauseFont) ApplyPanelFonts();
 
             var mouse = Mouse.current;
+            // A mouse held through the close no longer blocks once it is released.
+            if (_closedWithMouseDown && (mouse == null || !mouse.leftButton.isPressed)) _closedWithMouseDown = false;
             if (!_panel.activeSelf && _entry.activeSelf && mouse != null && mouse.leftButton.wasPressedThisFrame &&
                 RectTransformUtility.RectangleContainsScreenPoint(_entryRect, mouse.position.ReadValue(), null))
-                OpenFromEntry();
+                OpenFromEntry("entry press");
             if (toggle)
             {
-                if (_panel.activeSelf) SetOpen(false);
-                else OpenFromEntry();
+                if (_panel.activeSelf) SetOpen(false, "hotkey");
+                else OpenFromEntry("hotkey");
             }
             if (_panel.activeSelf)
             {
@@ -185,7 +206,24 @@ namespace StarVadersUltrawide
                     _captureStarted = true;
                     StartCoroutine(CaptureAfterRender(capture).WrapToIl2Cpp());
                 }
-                if (keyboard != null && keyboard.escapeKey.wasPressedThisFrame) SetOpen(false);
+                if (keyboard != null && keyboard.escapeKey.wasPressedThisFrame) SetOpen(false, "escape");
+                // The UI module can miss a click on the frame its input is enabled.
+                // Closing is idempotent, so also read the mouse directly.
+                if (_awaitingRelease)
+                {
+                    // Enable UI input the frame after the opening press is released.
+                    if (mouse == null || (!mouse.leftButton.isPressed && !mouse.leftButton.wasReleasedThisFrame))
+                    {
+                        _awaitingRelease = false;
+                        _eventRoot.SetActive(true);
+                    }
+                }
+                else if (mouse != null && _close != null)
+                {
+                    bool over = RectTransformUtility.RectangleContainsScreenPoint(_close, mouse.position.ReadValue(), null);
+                    if (mouse.leftButton.wasPressedThisFrame) _closePressed = over;
+                    if (mouse.leftButton.wasReleasedThisFrame && _closePressed && over) SetOpen(false, "close mouse");
+                }
                 if (smoke && _smokeOpened && Time.unscaledTime >= _smokeCloseAt)
                 {
                     SetOpen(false);
@@ -226,28 +264,34 @@ namespace StarVadersUltrawide
         void TestButtons()
         {
             bool enabled = Plugin.Enabled.Value;
+            bool centered = HudSizing._centerHud.Value;
             float hud = HudSizing._hudScale.Value, board = HudSizing._boardScale.Value;
             try
             {
                 ClickTestButton("EnableFix");
                 if (Plugin.Enabled.Value == enabled) throw new InvalidOperationException("Toggle button callback did not run.");
+                ClickTestButton("HUD FRAME");
+                if (HudSizing._centerHud.Value == centered) throw new InvalidOperationException("HUD frame toggle callback did not run.");
+                ClickTestButton("HUD FRAME");
+                if (HudSizing._centerHud.Value != centered) throw new InvalidOperationException("HUD frame toggle did not restore.");
                 HudSizing._hudScale.Value = 1.01f;
                 HudSizing._boardScale.Value = 1.02f;
-                ClickTestButton("RESET TO 123%");
-                if (Math.Abs(HudSizing._hudScale.Value - HudSizing.DefaultScale) > 0.001f ||
-                    Math.Abs(HudSizing._boardScale.Value - HudSizing.DefaultScale) > 0.001f)
+                ClickTestButton("RESET TO 100%");
+                if (Math.Abs(HudSizing._hudScale.Value - HudSizing.DefaultHudScale) > 0.001f ||
+                    Math.Abs(HudSizing._boardScale.Value - HudSizing.DefaultBoardScale) > 0.001f)
                     throw new InvalidOperationException("Reset button callback did not run.");
                 ClickTestButton("CLOSE");
                 if (_panel.activeSelf) throw new InvalidOperationException("Close button callback did not run.");
-                Plugin.Instance.Log.LogInfo("BUTTON TEST PASS: Toggle, Reset, Close are the top raycast targets and their native pointer-click callbacks work.");
+                Plugin.Instance.Log.LogInfo("BUTTON TEST PASS: Toggle, HUD frame, Reset, Close are the top raycast targets and their native pointer-click callbacks work.");
             }
             catch (Exception error) { Plugin.Instance.Log.LogError("BUTTON TEST FAIL: " + error); }
             finally
             {
+                HudSizing._centerHud.Value = centered;
                 Plugin.Enabled.Value = enabled;
                 HudSizing._hudScale.Value = hud;
                 HudSizing._boardScale.Value = board;
-                if (_panel.activeSelf) SetOpen(false);
+                if (_panel.activeSelf) SetOpen(false, "test");
                 _smokeCloseAt = float.PositiveInfinity;
             }
         }
@@ -289,9 +333,29 @@ namespace StarVadersUltrawide
             catch (Exception error) { Plugin.Instance.Log.LogWarning("Menu capture unavailable: " + error.Message); }
         }
 
-        void OpenFromEntry()
+        // A click that closes the panel can also land on the entry beneath it.
+        // Ignore entry opens until the mouse is released after a close.
+        void OpenFromEntry(string source)
         {
+            var mouse = Mouse.current;
+            // The stray click arrives within a frame or two of the close.
+            if (source != "hotkey" && (Time.unscaledTime - _closedTime < .2f || (_closedWithMouseDown && mouse != null && mouse.leftButton.isPressed)))
+            {
+                Plugin.Instance.Log.LogInfo($"Menu reopen ignored ({source}) right after close.");
+                return;
+            }
+            _closedWithMouseDown = false;
+            Plugin.Instance.Log.LogInfo($"Menu open requested ({source}).");
             SetOpen(true);
+        }
+
+        // StarVaders has no paused flag; the pause screen fades its canvas
+        // group in and only accepts clicks while it is fully shown.
+        bool PauseVisible()
+        {
+            if (_pause == null || !_pause.isActiveAndEnabled || _pause.IsEndingScene) return false;
+            var group = _pause._canvasGroup;
+            return group != null && group.alpha > .9f && group.blocksRaycasts && group.interactable;
         }
 
         void PositionEntry(bool inSettings, bool inPause)
@@ -304,23 +368,139 @@ namespace StarVadersUltrawide
                 _entryBorder.SetActive(inSettings);
                 _entryArtwork.Bottom = inSettings ? .10f : .22f;
                 _entryArtwork.Top = inSettings ? .90f : .78f;
-                _entryArtwork.rectTransform.sizeDelta = new Vector2(inSettings ? 352 : 360, inSettings ? 58 : 66);
-                _entryArtwork.color = inSettings ? new Color(.08f, .24f, .58f, 1f) : new Color(.12f, .34f, .32f, 1f);
+                // Pause: the size of the native Show Guide button on its dock.
+                _entryArtwork.rectTransform.sizeDelta = new Vector2(inSettings ? 352 : 304, inSettings ? 58 : 66);
+                _entry.GetComponent<RectTransform>().sizeDelta = new Vector2(inSettings ? 360 : 304, 66);
+                // Pause: the teal of the native OPTIONS button.
+                _entryArtwork.color = inSettings ? new Color(.08f, .24f, .58f, 1f) : new Color(.07f, .56f, .62f, 1f);
                 _entryArtwork.SetVerticesDirty();
                 _entryLabel.font = font != null ? font : _labelFont;
-                _entryLabel.color = inSettings ? Color.white : new Color(.74f, .96f, .89f, 1f);
+                _entryLabel.color = Color.white;
                 _entryLabel.fontStyle = font != null ? FontStyle.Normal : FontStyle.Bold;
                 SizeNativeLabel(_entryLabel, font, 28, inSettings);
                 _entrySettings = inSettings;
                 _entryFont = font;
             }
             if (_entryRect == null) _entryRect = _entry.GetComponent<RectTransform>();
-            // Keep the entry beside the pause panel, clear of its header and buttons.
-            var position = inSettings ? new Vector2(0, -470) : new Vector2(510, 0);
+            var position = inSettings ? new Vector2(0, -470) : _pauseEntryPosition;
             if (_entryRect.anchoredPosition != position) _entryRect.anchoredPosition = position;
+            var size = inSettings ? new Vector2(360, 66) : _pauseEntrySize;
+            if (_entryRect.sizeDelta != size) _entryRect.sizeDelta = size;
+            // In pause the copied native button is the visual; the entry is
+            // only its click area.
+            if (_entryArtwork.enabled == inPause) _entryArtwork.enabled = !inPause;
+            if (_entryLabel.enabled == inPause) _entryLabel.enabled = !inPause;
         }
+
+        // The pause screen's bottom row: Show Guide and Abandon Run each sit on a
+        // black dock (GuidePanel / AbandonPanel, bottom-center anchored). The mod
+        // entry gets a copy of that dock, centered, and the two native docks
+        // move out symmetrically while the pause screen is shown.
+        const float PauseDockSpacing = 410f;
+        GameObject _pauseDock;
+        RectTransform _guideDock, _abandonDock;
+        // Native X only: the game slides the docks up on its own, so their
+        // height is never touched.
+        float _guideNativeX, _abandonNativeX;
+
+        Vector2 _pauseEntryPosition = new(0, -461), _pauseEntrySize = new(304, 96);
+        CanvasGroup _pauseDockGroup;
+        RectTransform _pauseDockButton;
+
+        // Shown from the first frame of the pause fade-in, so the copied button
+        // slides and fades in together with the native row.
+        bool PauseShown()
+        {
+            if (_pause == null || !_pause.isActiveAndEnabled || _pause.IsEndingScene) return false;
+            var group = _pause._canvasGroup;
+            return group != null && group.alpha > .01f;
+        }
+
+        void UpdatePauseRow()
+        {
+            var canvas = _pause?.MainPanel?.GetComponentInParent<Canvas>()?.rootCanvas;
+            if (canvas == null) return;
+            var group = canvas.transform.Find("CanvasGroup");
+            var guide = group?.Find("GuidePanel")?.TryCast<RectTransform>();
+            var abandon = group?.Find("AbandonPanel")?.TryCast<RectTransform>();
+            if (guide == null || abandon == null) return;
+            if (_guideDock != guide)
+            {
+                _guideDock = guide;
+                _guideNativeX = guide.anchoredPosition.x;
+            }
+            if (_abandonDock != abandon)
+            {
+                _abandonDock = abandon;
+                _abandonNativeX = abandon.anchoredPosition.x;
+            }
+            SetDockX(guide, -PauseDockSpacing);
+            SetDockX(abandon, PauseDockSpacing);
+            if (_pauseDock == null) BuildPauseDock(guide);
+            if (_pauseDock == null) return;
+            if (!_pauseDock.activeSelf) _pauseDock.SetActive(true);
+            // Follow the native fade and slide-in. Both canvases are 1080 units
+            // tall and centered, so the native dock's local height maps directly.
+            float alpha = _pause._canvasGroup.alpha;
+            if (_pauseDockGroup.alpha != alpha) _pauseDockGroup.alpha = alpha;
+            var dockRect = _pauseDock.GetComponent<RectTransform>();
+            var dockPosition = new Vector2(0f, guide.localPosition.y);
+            if (dockRect.anchoredPosition != dockPosition) dockRect.anchoredPosition = dockPosition;
+            if (_pauseDockButton != null)
+            {
+                _pauseEntryPosition = dockPosition + (Vector2)_pauseDockButton.localPosition;
+                _pauseEntrySize = _pauseDockButton.rect.size;
+            }
+        }
+
+        // A visual-only copy of the native Show Guide dock and button, relabeled.
+        // It is cloned under an inactive holder so none of the game's scripts
+        // wake up on the copy, then everything but the visuals is removed.
+        void BuildPauseDock(RectTransform guide)
+        {
+            var holder = new GameObject("UltrawidePauseDockHolder");
+            holder.SetActive(false);
+            holder.transform.SetParent(_root.transform, false);
+            var dock = UnityEngine.Object.Instantiate(guide.gameObject, holder.transform, false);
+            dock.name = "UltrawidePauseDock";
+            foreach (var behaviour in dock.GetComponentsInChildren<Behaviour>(true))
+                if (!IsVisual(behaviour)) UnityEngine.Object.DestroyImmediate(behaviour);
+            foreach (var graphic in dock.GetComponentsInChildren<Graphic>(true)) graphic.raycastTarget = false;
+            foreach (var text in dock.GetComponentsInChildren<TextMeshProUGUI>(true)) text.text = "Ultrawide Mod";
+            _pauseDockButton = dock.transform.Find("Guide")?.TryCast<RectTransform>();
+            _pauseDockGroup = dock.GetComponent<CanvasGroup>() ?? dock.AddComponent<CanvasGroup>();
+            _pauseDockGroup.interactable = _pauseDockGroup.blocksRaycasts = false;
+            var rect = dock.GetComponent<RectTransform>();
+            rect.SetParent(_root.transform, false);
+            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(.5f, .5f);
+            rect.localScale = Vector3.one;
+            rect.SetSiblingIndex(_entry.transform.GetSiblingIndex());
+            UnityEngine.Object.Destroy(holder);
+            _pauseDock = dock;
+        }
+
+        static bool IsVisual(Behaviour behaviour) =>
+            behaviour.TryCast<Graphic>() != null || behaviour.TryCast<CanvasGroup>() != null ||
+            behaviour.TryCast<Mask>() != null || behaviour.TryCast<RectMask2D>() != null ||
+            behaviour.TryCast<LayoutGroup>() != null || behaviour.TryCast<ContentSizeFitter>() != null ||
+            behaviour.TryCast<BaseMeshEffect>() != null;
+
+        static void SetDockX(RectTransform dock, float x)
+        {
+            if (dock == null || Mathf.Abs(dock.anchoredPosition.x - x) < .01f) return;
+            dock.anchoredPosition = new Vector2(x, dock.anchoredPosition.y);
+        }
+
+        void HidePauseRow()
+        {
+            if (_pauseDock != null && _pauseDock.activeSelf) _pauseDock.SetActive(false);
+            SetDockX(_guideDock, _guideNativeX);
+            SetDockX(_abandonDock, _abandonNativeX);
+        }
+
         void OnDestroy()
         {
+            HidePauseRow();
             if (_live == this) _live = null;
             if (_panel != null && _panel.activeSelf) SetOpen(false);
             if (_root != null) UnityEngine.Object.Destroy(_root);
@@ -356,6 +536,9 @@ namespace StarVadersUltrawide
                 if (label == null || !label.isActiveAndEnabled) { _pauseVisibleFrame = -1; return; }
                 if (_pauseVisibleFrame < 0) _pauseVisibleFrame = Time.frameCount;
                 if (Time.frameCount > _pauseVisibleFrame) _pauseFont = _fonts.CopyPause(label);
+                // StarVaders strips the pause TMP font's source file; its buttons
+                // use the Blockvaders family, which the main menu already loaded.
+                if (Time.frameCount > _pauseVisibleFrame && _pauseFont == null) _pauseFont = _fonts.Find("Blockvaders");
             }
         }
 
@@ -429,9 +612,17 @@ namespace StarVadersUltrawide
                 foreach (var label in _root.GetComponentsInChildren<Text>(true)) label.font = _labelFont;
         }
 
-        void SetOpen(bool open)
+        void SetOpen(bool open, string reason = "other")
         {
             if (_panel == null || _panel.activeSelf == open) return;
+            _closePressed = false;
+            _awaitingRelease = false;
+            if (!open)
+            {
+                _closedTime = Time.unscaledTime;
+                _closedWithMouseDown = Mouse.current != null && Mouse.current.leftButton.isPressed;
+                Plugin.Instance.Log.LogInfo($"Menu closed ({reason}).");
+            }
             if (open)
             {
                 EnsureFont();
@@ -454,7 +645,8 @@ namespace StarVadersUltrawide
                 _suspendedEvents.Clear();
                 foreach (var events in UnityEngine.Object.FindObjectsOfType<EventSystem>())
                     if (events.enabled) { events.enabled = false; _suspendedEvents.Add(events); }
-                _eventRoot.SetActive(true);
+                _awaitingRelease = Mouse.current != null && Mouse.current.leftButton.isPressed;
+                _eventRoot.SetActive(!_awaitingRelease);
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
                 Sync();
@@ -505,6 +697,7 @@ namespace StarVadersUltrawide
         {
             _syncedHud = _syncedBoard = float.NaN;
             _syncedEnabled = null;
+            _syncedCenterHud = null;
             _entryLabel = null;
             _entryRect = null;
             _entrySettings = null;
@@ -529,7 +722,7 @@ namespace StarVadersUltrawide
 
             _entry = Button(_root.transform, "ULTRAWIDE MOD", new Vector2(0, -470), new Vector2(360, 66), () =>
             {
-                OpenFromEntry();
+                OpenFromEntry("entry click");
             });
             _entryArtwork = _entry.transform.Find("Artwork").GetComponent<MenuGraphic>();
             _entryBorder = new GameObject("OptionsButtonBorder");
@@ -550,9 +743,9 @@ namespace StarVadersUltrawide
             dim.color = new Color(0.015f, 0.025f, 0.05f, 0.96f);
             dim.raycastTarget = true;
             var frame = new GameObject("Panel");
-            Rect(frame, _panel.transform, new Vector2(900, 670), Vector2.zero);
+            Rect(frame, _panel.transform, new Vector2(900, 800), Vector2.zero);
             var background = AddGraphic(frame);
-            background.Bottom = 0.23f;
+            background.Bottom = 0.04f;
             background.Top = 0.82f;
             background.Slant = 20f;
             background.color = new Color(0.075f, 0.18f, 0.21f, 1f);
@@ -572,14 +765,20 @@ namespace StarVadersUltrawide
             {
                 if (!_syncing) HudSizing._boardScale.Value = Mathf.Round(value) / 100f;
             });
-            Button(frame.transform, "RESET TO 123%", new Vector2(-190, -200), new Vector2(340, 70), () =>
+            var hudLayout = Button(frame.transform, "HUD FRAME", new Vector2(0, -175), new Vector2(620, 65), () =>
             {
-                HudSizing._hudScale.Value = HudSizing.DefaultScale;
-                HudSizing._boardScale.Value = HudSizing.DefaultScale;
+                HudSizing._centerHud.Value = !HudSizing._centerHud.Value;
                 Sync();
             });
-            Button(frame.transform, "CLOSE", new Vector2(200, -200), new Vector2(300, 70), () => SetOpen(false));
-            Label(frame.transform, $"Changes save automatically   /   Menu key: {Hotkeys.Menu.Value}", new Vector2(0, -280), new Vector2(850, 45), 22);
+            _hudLayoutLabel = hudLayout.GetComponentInChildren<Text>();
+            Button(frame.transform, "RESET TO 100%", new Vector2(-190, -250), new Vector2(340, 70), () =>
+            {
+                HudSizing._hudScale.Value = HudSizing.DefaultHudScale;
+                HudSizing._boardScale.Value = HudSizing.DefaultBoardScale;
+                Sync();
+            });
+            _close = Button(frame.transform, "CLOSE", new Vector2(200, -250), new Vector2(300, 70), () => SetOpen(false, "close button")).GetComponent<RectTransform>();
+            Label(frame.transform, $"Changes save automatically   /   Menu key: {Hotkeys.Menu.Value}", new Vector2(0, -330), new Vector2(850, 45), 22);
             Sync();
             _panel.SetActive(false);
             Plugin.Instance.Log.LogInfo($"Mod menu ready. {Hotkeys.Menu.Value} opens it anywhere; Settings also has an Ultrawide Mod entry.");
@@ -690,13 +889,16 @@ namespace StarVadersUltrawide
         {
             float hud = HudSizing._hudScale.Value, board = HudSizing._boardScale.Value;
             bool enabled = Plugin.Enabled.Value;
-            if (_syncedHud == hud && _syncedBoard == board && _syncedEnabled == enabled) return;
+            bool centered = HudSizing._centerHud.Value;
+            if (_syncedHud == hud && _syncedBoard == board && _syncedEnabled == enabled && _syncedCenterHud == centered) return;
             _syncing = true;
             _hud.SetValueWithoutNotify(HudSizing._hudScale.Value * 100);
             _board.SetValueWithoutNotify(HudSizing._boardScale.Value * 100);
             _hudLabel.text = $"HUD SIZE   {HudSizing._hudScale.Value:P0}";
             _boardLabel.text = $"BOARD SIZE   {HudSizing._boardScale.Value:P0}";
             _enabledLabel.text = "ULTRAWIDE FIX: " + (Plugin.Enabled.Value ? "ON" : "OFF");
+            _hudLayoutLabel.text = centered ? "HUD FRAME: CENTERED 16:9" : "HUD FRAME: FULL WIDTH";
+            _syncedCenterHud = centered;
             _syncedHud = hud;
             _syncedBoard = board;
             _syncedEnabled = enabled;

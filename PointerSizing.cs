@@ -18,8 +18,10 @@ namespace StarVadersUltrawide
 
         static void Prefix()
         {
+            long started = Profile.Start();
             var sizing = HudSizing.Active;
             if (sizing != null) sizing.ApplySizing();
+            Profile.Stop(started, Profile.Hook.Pointer);
         }
     }
 }

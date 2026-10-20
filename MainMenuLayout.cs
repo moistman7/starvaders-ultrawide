@@ -16,11 +16,12 @@ public class MainMenuLayout : MonoBehaviour
     bool _pressed, _opened, _verified;
     readonly bool _layoutTest = Environment.GetEnvironmentVariable("STARVADERS_UW_LAYOUT_TEST") == "1";
 
-    void LateUpdate()
+    void LateUpdate() { long started = Profile.Start(); try { LateUpdateCore(); } finally { Profile.Stop(started, Profile.Hook.MainMenu); } }
+    void LateUpdateCore()
     {
         if (_menu == null && Time.unscaledTime >= _nextSearch)
         {
-            _nextSearch = Time.unscaledTime + .25f;
+            _nextSearch = Time.unscaledTime + 1f;
             _menu = UnityEngine.Object.FindObjectOfType<MainMenuSceneController>(true);
         }
         bool test = _layoutTest;
