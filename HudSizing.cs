@@ -14,6 +14,7 @@ namespace StarVadersUltrawide
         internal static ConfigEntry<float> _hudScale;
         internal static ConfigEntry<float> _boardScale;
         internal const float DefaultScale = 1.23f;
+        internal static HudSizing Active;
         float _nextDiscovery;
         readonly List<Transform> _targets = new();
         Transform _board;
@@ -24,6 +25,7 @@ namespace StarVadersUltrawide
 
         void Start()
         {
+            Active = this;
             _hudScale = Plugin.Instance.Config.Bind("Interface", "HudScale", DefaultScale,
                 new ConfigDescription("Encounter panel size multiplier. F6 decreases and F7 increases both HUD and board size.", new AcceptableValueRange<float>(1f, 1.35f)));
             _boardScale = Plugin.Instance.Config.Bind("Interface", "BoardScale", DefaultScale,
@@ -42,7 +44,11 @@ namespace StarVadersUltrawide
             _applied.Clear();
         }
 
-        void OnDestroy() => Restore();
+        void OnDestroy()
+        {
+            Restore();
+            if (Active == this) Active = null;
+        }
 
         void Update()
         {
@@ -91,7 +97,11 @@ namespace StarVadersUltrawide
             _targets.Add(target);
         }
 
-        void LateUpdate()
+        void LateUpdate() => ApplySizing();
+
+        // Refresh after native animation/layout writes and before hit testing.
+        // The tracked baseline prevents nested input calls from scaling twice.
+        internal void ApplySizing()
         {
             if (_hudScale == null || !Plugin.Enabled.Value || Screen.height <= 0 ||
                 (float)Screen.width / Screen.height <= 16f / 9f + 0.01f)

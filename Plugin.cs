@@ -13,7 +13,7 @@ using HarmonyLib;
 
 namespace StarVadersUltrawide
 {
-    [BepInPlugin("local.starvaders.ultrawide", "StarVaders Ultrawide", "0.1.0")]
+    [BepInPlugin("local.starvaders.ultrawide", "StarVaders Ultrawide", "0.1.1")]
     public class Plugin : BasePlugin
     {
         internal static Plugin Instance;
@@ -55,6 +55,7 @@ namespace StarVadersUltrawide
             ClassInjector.RegisterTypeInIl2Cpp<UwBehaviour>();
             AddComponent<UwBehaviour>();
             AddComponent<HudSizing>();
+            new Harmony("local.starvaders.ultrawide.pointer").PatchAll(typeof(PointerSizing));
             AddComponent<EncounterLayout>();
             AddComponent<MainMenuLayout>();
             AddComponent<SelectionLayout>();

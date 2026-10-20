@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>NorthernDale</Authors>
     <!-- Pass your install folder: dotnet build -c Release -p:GameDir="C:\Path\To\StarVaders\" -->
     <GameDir Condition="'$(GameDir)' == ''">D:\SteamLibrary\steamapps\common\StarVaders\</GameDir>

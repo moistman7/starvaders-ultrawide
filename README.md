@@ -6,6 +6,7 @@ An experimental BepInEx IL2CPP mod for StarVaders by NorthernDale.
 
 - Height-based UI scaling on ultrawide displays.
 - Adjustable encounter HUD and board sizes, with HUD panels near the screen edges.
+- Refresh enlarged board/HUD transforms before mouse hover, click, release, and cancel handling so hit testing follows the visible layout.
 - Mech and pilot selection layout corrections.
 - Resolution recovery by toggling the fix off and on.
 - Mod settings available from Options or F10. The pause screen has no mod button.
@@ -44,6 +45,8 @@ dotnet build -c Release -p:GameDir="D:/SteamLibrary/steamapps/common/StarVaders/
 Replace `GameDir` with your installation folder. The project defaults to the path shown above.
 
 ## Status
+
+Version 0.1.1 adds the DiceVaders pointer-sizing fix adapted to StarVaders' persistent enlargement. Input refreshes reuse tracked native baselines, preserving animation changes and avoiding compounded scaling. Release build verified; live gameplay checks of this version remain pending.
 
 Work in progress. Mech/pilot selection and one empty-tile mouse alignment check were verified at 3440×1440 during development. Some campaign/shop menu backgrounds and clipped controls still need cleanup. The latest rack and menu changes need further visual verification.
 
